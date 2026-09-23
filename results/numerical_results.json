@@ -1,0 +1,16 @@
+{
+  "shape": [
+    26,
+    26
+  ],
+  "mae": 0.0038501798568633663,
+  "rmse": 0.004852447984457079,
+  "max_error": 0.016593250314658192,
+  "exact_mismatch_count": 0,
+  "accumulator_overflow_count": 0,
+  "fp32_reference_recheck_max_error": 0.0,
+  "provenance": "native C++ testbench, not HLS co-simulation",
+  "legacy_abs127_count": 4,
+  "saturation_count": null,
+  "saturation_count_note": "Legacy boundary-count field renamed; corrected clipping count not rerun."
+}

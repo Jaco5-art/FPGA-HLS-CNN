@@ -1,0 +1,17 @@
+{
+  "historical_project": {
+    "source": "owner-reported",
+    "core_ii_cycles_upper_bound": 676,
+    "clock_target_mhz": 100,
+    "throughput_target_achieved": true,
+    "throughput_numeric_value": null,
+    "full_cnn_accuracy_percent_lower_bound_exclusive": 80
+  },
+  "additional_experiments": {
+    "source": "owner-reported",
+    "completed": true,
+    "reported_outcome": "Same as previous results",
+    "raw_reports_included": false,
+    "new_per_version_measurements": null
+  }
+}

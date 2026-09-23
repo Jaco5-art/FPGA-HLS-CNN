@@ -1,0 +1,13 @@
+{
+  "seed": 42,
+  "input_scale": 0.007874015748031496,
+  "weight_scale": 0.007874015748031496,
+  "output_scale": 6.200012400024799e-05,
+  "accumulator_bits": 32,
+  "rounding": "numpy.rint ties to even",
+  "clamp": [
+    -128,
+    127
+  ],
+  "output": "INT32 accumulation; dequantize using output_scale"
+}
