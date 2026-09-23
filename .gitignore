@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build*/
+*.o
+*.exe
+*.log
+*.jou
+.Xil/
+.vitis_hls/
+.DS_Store
+conv_tb
