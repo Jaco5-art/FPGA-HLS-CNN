@@ -1,62 +1,98 @@
-# FPGA/HLS CNN Inference Accelerator with INT8 Quantization
+# CNN Convolution Acceleration with FPGA/HLS and CUDA
 
-**FPGA/HLS CNN 推理加速与定点量化优化**
+**基于 FPGA/HLS 与 CUDA 的 CNN 卷积加速与性能分析**
 
-A CNN acceleration project originating from the Santa Clara University ECEN226 final exam, extended with an independently implemented INT8 convolution kernel. The project combines GEMM-based convolution, HLS operator design, explicit quantization and numerical verification.
+This project studies convolution acceleration through a common **Im2col + GEMM** formulation. The FPGA/HLS path explores pipelining and INT8 arithmetic; the CUDA path compares global-memory and shared-memory GEMM kernels, tile sizes, and measured GPU resource usage. The focus is operator-level correctness and architecture-aware performance analysis.
 
-## Project overview
+## Workloads
 
-The original CNN used a 28×28×1 input, Conv2D with one 3×3 filter and ReLU, 2×2 max pooling (stride 2), Flatten, Dense(100, ReLU), Dropout, and a final Dense + Softmax layer. The convolution was expressed as `Im2col()` followed by `GemmConv2d0()`, with notebook trace data used for verification.
-
-The current source release provides the convolution extension: a matching FP32 baseline and an INT8 implementation using the same im2col + GEMM structure. It preserves the operator design of the project while introducing explicit data types and quantization scales.
-
-## Results
-
-| Metric | Recorded result | Scope / source |
+| Case | GEMM A × B | Purpose |
 |---|---|---|
-| Core initiation interval | ≤676 cycles | Original project, owner-reported |
-| Clock target | 100 MHz | Original design target; current synthesis script uses 10 ns |
-| Throughput | Original prescribed target achieved | Owner-reported; numerical throughput value not retained |
-| Full CNN classification accuracy | >80% | Original full-network result, owner-reported |
-| Extension MAE vs FP32 | 0.00385018 | Included native C++ numerical check |
-| Extension RMSE vs FP32 | 0.00485245 | Included native C++ numerical check |
-| Extension maximum absolute error | 0.01659325 | Included native C++ numerical check |
-| Integer reference mismatches | 0 / 676 outputs | Included native C++ numerical check |
-| INT32 accumulator overflows | 0 | Included reference calculation |
+| Original | [676 × 9] × [9 × 1] | Valid 3×3 convolution on a 28×28 single-channel input |
+| Expanded | [676 × 144] × [144 × 64] | Synthetic matrices with dimensions corresponding to 16 input channels and 64 output channels |
 
-The owner reports completing additional experiments with outcomes unchanged from the earlier project. This release retains the earlier recorded figures with their original scope. New raw reports and per-version DSP/LUT/FF/BRAM values were not supplied, so this repository does not infer numerical resource savings or a new kernel II from the historical values. See [results provenance](docs/RESULTS.md).
+Current operator tests exclude bias, activation, pooling and dense layers. The expanded case is a convolution-derived GEMM workload, not a trained CNN evaluation. CUDA inputs and HLS quantization vectors are verified against their respective references; these are not identical cross-platform input datasets.
 
-## Quantized convolution
+## FPGA/HLS path
 
-| Component | Design |
-|---|---|
-| Input / kernel | 28×28×1 / one 3×3 kernel |
-| Operation | Valid cross-correlation, stride 1, no bias or activation |
-| Output shape | 26×26 |
-| Input and weights | Signed INT8 |
-| Accumulator and output | Signed INT32 |
-| Input / weight scale | 1/127 each |
-| Output dequantization scale | 1/16129 |
-| Quantizer | Nearest-even rounding followed by clipping to [-128, 127] |
+- `Im2col()` maps image patches to a 676×9 matrix; `GemmConv2d0()` computes the convolution using GEMM.
+- FP32 and INT8 implementations use HLS pipeline directives. Requested loop II is not a guarantee of achieved II or top-level latency.
+- Signed INT8 inputs/weights, INT32 accumulation and output, nearest-even quantization with clipping, and explicit dequantization.
+- Input and weight scales: 1/127; output dequantization scale: 1/16129. Output requantization to INT8 is not implemented.
+- NumPy FP32 reference and native C++ integer verification; scripts extract latency, interval and DSP/LUT/FF/BRAM from HLS synthesis reports.
 
-INT32 output preserves the accumulated convolution before dequantization; INT8/INT16 output requantization is not included. Nine INT8 products have a maximum absolute sum bounded by 147456, within signed INT32 range.
+| Numerical metric | Recorded result |
+|---|---:|
+| Integer-reference mismatches | 0 / 676 |
+| MAE vs FP32 | 0.00385018 |
+| RMSE vs FP32 | 0.00485245 |
+| Maximum absolute error | 0.01659325 |
+| INT32 accumulator overflows | 0 |
 
-`Im2col()` produces a 676×9 matrix. `GemmConv2d0()` computes 676 dot products of length 9. The inner loops request `PIPELINE II=1` to expose sequential work to the HLS scheduler. Achieved loop II and top-level transaction interval depend on synthesis; the directive alone guarantees neither. FP32 recurrence latency may limit its inner-loop II. No partition or unroll directives are added.
+The course-level CNN comprises Conv2D/ReLU, max pooling, Dense(100)/ReLU, Dropout and Dense/Softmax. Its owner-reported results are **accuracy >80%** and **core II ≤676 cycles**, with a **100 MHz target**. The complete network source, trained weights and raw historical synthesis reports are unavailable in this repository. These figures are contextual results, not measurements reproduced by the current operator testbench. No numerical FPGA resource savings or cross-device speedup is claimed. See [HLS results provenance](docs/RESULTS.md).
 
-## Repository contents
+## CUDA path
 
-- `hls/`: FP32 and INT8 convolution source and type declarations.
-- `reference/`: NumPy FP32 operator reference.
-- `testbench/`: native C++ INT8 testbench.
-- `scripts/`: deterministic data generation, numerical verification, HLS synthesis and XML report extraction.
-- `results/`: retained input/weight arrays, output, quantization configuration and recorded results.
-- `docs/`: project history, results provenance and GitHub upload instructions.
+- Plain single-thread C++ GEMM reference, without BLAS.
+- Naive CUDA: one thread per output element, global-memory input reads.
+- Tiled CUDA: cooperative loads into shared memory, block synchronization and data reuse; tile sizes 8×8, 16×16 and 32×32.
+- Boundary checks handle partial tiles. Correctness uses an absolute-plus-relative tolerance of `1e-5 + 1e-5 * abs(reference)`.
+- All tested GPU configurations passed numerical checks against the FP32 CPU reference.
 
-The original complete CNN source, trained weights and synthesis reports are unavailable. The original course document is retained by the owner but was not supplied for this package. This source release therefore reproduces the extension, not the historical complete network.
+### Benchmark environment and method
 
-## Local numerical workflow
+NVIDIA GeForce RTX 2060 (6 GB, Windows WDDM), driver 551.76, CUDA Toolkit 12.4, MSVC 19.39, `sm_75`, and Nsight Compute 2024.1. Build uses `-O2`, C++17 and UTF-8.
 
-Python 3.9+, NumPy and a C++17 compiler are needed. From the repository root:
+Each implementation uses 10 warmups and 100 samples. CPU uses a host clock (1000 inner iterations per sample for the tiny case); GPU uses CUDA Events around individual kernel launches. Throughput is `2*M*N*K / time`. GPU event measurements can include device timeline gaps and are distinct from Nsight kernel duration.
+
+**Timings exclude allocation, Im2col and host/device transfers. They do not represent end-to-end CNN latency.** CPU speedups compare only with the plain single-thread reference, not optimized BLAS.
+
+### Standalone benchmark results
+
+| Workload | Implementation | Mean (ms) | Median (ms) | GFLOPS | Speedup vs CPU |
+|---|---|---:|---:|---:|---:|
+| Original | CPU | 0.004262 | 0.004242 | 2.855 | 1.000× |
+| Original | Naive | 0.026094 | 0.022400 | 0.466 | 0.163× |
+| Original | Tiled 8 | 0.012580 | 0.009904 | 0.967 | 0.339× |
+| Original | Tiled 16 | 0.013678 | 0.010240 | 0.890 | 0.312× |
+| Original | Tiled 32 | 0.015175 | 0.012480 | 0.802 | 0.281× |
+| Expanded | CPU | 4.785097 | 4.725400 | 2.604 | 1.000× |
+| Expanded | Naive | 0.046948 | 0.046864 | 265.400 | 101.923× |
+| Expanded | Tiled 8 | 0.053134 | 0.053120 | 234.500 | 90.056× |
+| Expanded | Tiled 16 | 0.039254 | 0.038800 | 317.423 | 121.902× |
+| Expanded | Tiled 32 | 0.048067 | 0.047968 | 259.221 | 99.550× |
+
+The original workload favors CPU execution. For the expanded workload, tile16 reduces mean latency by **16.4%** relative to naive CUDA (**1.196× speedup**). Larger tiles do not automatically improve performance.
+
+### Nsight Compute: expanded workload
+
+| Metric | Naive | Tiled 16 |
+|---|---:|---:|
+| Kernel duration | 42.14 μs | 33.44 μs |
+| Registers/thread | 52 | 39 |
+| Static shared memory/block | 0 | 2048 bytes |
+| Theoretical occupancy | 100% | 100% |
+| Achieved occupancy | 77.67% | 78.80% |
+| DRAM throughput utilization | 3.85% | 4.85% |
+| Blocks × threads/block | 172 × 256 | 172 × 256 |
+
+These individual profiling captures show a 20.6% duration reduction, separately from the repeated standalone benchmark. Shared-memory tiling enables reuse, but these sections alone do not quantify reductions in total memory traffic. Occupancy changes only slightly, and neither kernel saturates DRAM bandwidth in these captures. Profiling replay changes program timing: do not use benchmark CSVs produced under `ncu` as standalone latency results.
+
+FPGA and GPU differ in precision, execution model and available measurements. **This is an architectural comparison rather than a strict apples-to-apples performance benchmark.** II is not transaction latency.
+
+## Repository layout
+
+- `hls/`: FP32/INT8 HLS convolution implementations.
+- `reference/`, `testbench/`: numerical references and native C++ verification.
+- `scripts/`: vector generation, verification, HLS synthesis and report parsing.
+- `cuda/`: CPU baseline, naive/tiled kernels and unified benchmark.
+- `results/`: numerical artifacts and standalone CUDA benchmark outputs.
+- `results/profiling/`: Nsight text reports.
+- `docs/`: HLS result provenance and supporting instructions.
+
+## Run HLS numerical verification
+
+Requires Python 3.9+, NumPy and a C++17 compiler. Run from the repository root:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -66,19 +102,37 @@ g++ -std=c++17 -O2 hls/conv_top.cpp testbench/tb_conv.cpp -o conv_tb
 python scripts/verify.py results/int8_output.txt
 ```
 
-On Windows, compile with a C++17 toolchain and invoke the resulting `.exe`. These commands regenerate the sample results; packaging this release did not rerun experiments. The FP32 HLS top is included for synthesis, while the provided numerical testbench exercises the INT8 top. Native execution uses standard integer types; HLS synthesis selects AMD `ap_int` types. Native verification is not vendor C simulation or RTL co-simulation.
-
-## HLS synthesis workflow
-
-On a machine with Vitis HLS and a supported FPGA part, set `HLS_PART` to the installed part identifier, then run from this directory:
+Native verification is not vendor C simulation or RTL co-simulation. For synthesis, set `HLS_PART` to a supported installed FPGA part, then run:
 
 ```bash
 vitis_hls -f scripts/run_hls.tcl
 python scripts/parse_hls_report.py build_conv_fp32/solution1/syn/report/conv_fp32_csynth.xml build_conv_int8/solution1/syn/report/conv_int8_csynth.xml
 ```
 
-The script applies the same FPGA part and 10 ns clock constraint to both versions. Inspect latency, top-level interval, estimated clock and DSP/LUT/FF/BRAM in the generated report. Missing XML fields remain null. Check the report device, clock, tool version and achieved timing before interpreting comparisons. The scripts currently perform synthesis only, not vendor C simulation or RTL co-simulation.
+The synthesis script uses a 10 ns clock constraint. Inspect actual timing, device and resource reports before drawing hardware conclusions.
 
-## Upload
+## Run CUDA benchmark (Windows CMD)
 
-See [GitHub upload guide](docs/GITHUB_UPLOAD.md). Suggested repository name: `fpga-hls-cnn`. No license has been selected; choose one appropriate to your ownership and course policy before granting reuse rights.
+Use an x64 Visual Studio developer prompt with the CUDA-12.4-compatible MSVC 19.39 toolset. The two kernel source files must be next to `benchmark.cu`; the benchmark includes them directly.
+
+```bat
+if not exist results mkdir results
+nvcc -O2 -std=c++17 -arch=sm_75 -Xcompiler "/utf-8" cuda\benchmark.cu -o benchmark.exe
+benchmark.exe
+```
+
+Outputs: `results/cuda_benchmark.csv` and `results/benchmark_samples.csv`. A successful run ends with `ALL CORRECTNESS CHECKS PASSED`.
+
+For profiling, use an administrator CMD if GPU performance counter access is restricted. Keep profiler-generated benchmark CSVs separate:
+
+```bat
+if not exist results\profiling mkdir results\profiling
+cd results\profiling
+if not exist results mkdir results
+ncu --section SpeedOfLight --section LaunchStats --section Occupancy --launch-skip 455 --launch-count 1 -o expanded_naive_admin ..\..\benchmark.exe
+ncu --section SpeedOfLight --section LaunchStats --section Occupancy --launch-skip 677 --launch-count 1 -o expanded_tiled16_admin ..\..\benchmark.exe
+ncu --import expanded_naive_admin.ncu-rep --page details > expanded_naive_details.txt
+ncu --import expanded_tiled16_admin.ncu-rep --page details > expanded_tiled16_details.txt
+```
+
+Launch offsets assume the current benchmark order and 111 launches per GPU implementation (one correctness check, ten warmups, 100 timed launches). Recalculate offsets if the harness changes; verify the captured kernel name and grid dimensions.
