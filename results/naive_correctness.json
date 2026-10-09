@@ -1,0 +1,11 @@
+{
+  "implementation": "naive_cuda_fp32",
+  "reference": "cpu_gemm_fp32",
+  "M": 676, "N": 1, "K": 9,
+  "outputs": 676,
+  "max_abs_error": 2.38418579102e-07,
+  "mae": 2.38065888896e-08,
+  "rmse": 5.85874923727e-08,
+  "mismatches": 0,
+  "passed": true
+}
